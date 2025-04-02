@@ -1,6 +1,5 @@
 # aprendendo_ros2
 ## Os próximos comandos são executados fora do Docker
-## alguma coisa so pra mudar
 Rodando o ambiente ROS
 ```bash
 cd .devcontainer

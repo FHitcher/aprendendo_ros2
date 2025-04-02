@@ -20,6 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            'no_posicao = Proj_prob.posicao:main',
+            'no_ekf = Proj_prob.EKF:main',
         ],
     },
 )
