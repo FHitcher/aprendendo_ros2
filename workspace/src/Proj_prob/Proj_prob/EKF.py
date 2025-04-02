@@ -26,7 +26,7 @@ class NoDePosicao(Node):
         self.publisher_joint = self.create_publisher(JointState, '/joint_state', qos_profile)
         self.publisher_laser = self.create_publisher(LaserScan, '/laser_data', qos_profile)
         self.publisher_posicao = self.create_publisher(Float64, '/posicao', qos_profile)
-        self.timer = self.create_timer(1, self.update)  # Atualização a cada 0.1 segundos
+        self.timer = self.create_timer(1, self.update)  # Atualização a cada 1 segundos
 
         # Variáveis de estado
         self.jointL = 0.0
@@ -41,13 +41,25 @@ class NoDePosicao(Node):
 
 
         #Ruidos aleatorios que corrompem a posição verdadeira do robo real
-        self.ksi_x = random.randint(0, 0.005)
-        self.ksi_y = random.randint(0, 0.005)
-        self.ksi_z = random.randint(0, 0.005)
-        self.ksi_th = math.radians(random.randint(0, 0.01))
-        self.ksi_v = random.randint(0, 0.01)
-        self.ksi_w = math.radians(random.randint(0, 0.01))
         
+        self.sigma_x = 0.05
+        self.sigma_y = 0.05
+        self.sigma_z = 0.05
+        self.sigma_th = math.radians(0.1)
+        self.sigma_v = 0.01
+        self.sigma_w = math.radians(0.1)
+
+
+        self.ksi_x = self.sigma_x * random.normalvariate()
+        self.ksi_y = self.sigma_y * random.normalvariate()
+        self.ksi_z = self.sigma_z * random.normalvariate()
+        self.ksi_th = self.sigma_th * random.normalvariate()
+        self.ksi_v = self.sigma_v * random.normalvariate()
+        self.ksi_w = self.sigma_w * random.normalvariate()
+
+
+        self.sigma_z_x = 0.1
+        self.sigma_z_y = 0.1
         
         # Mapa
         self.estado_inicial = 0 #pq diabos isso estava em 4 n sei mas agr ta tudo funcionando
@@ -62,47 +74,67 @@ class NoDePosicao(Node):
         y = msg.pose.pose.orientation.y
         z = msg.pose.pose.orientation.z
         w = msg.pose.pose.orientation.w
-        _,_,yaw = tf_transformations.euler_from_quaternion([x,y,z,w])
+        _,_,self.yaw = tf_transformations.euler_from_quaternion([x,y,z,w])
 
     def listener_callback_pose(self, msg):
         self.pose_x = msg.pose.pose.position.x
         self.pose_y = msg.pose.pose.position.y
-        self.pose_z = msg.pose.pose.position.z
 
     def update(self):
+        ##Definindo a posição real do robo
+        Pv = self.pose.copy()
+        
+        # Atualização de posição com ruído
+        Pv[0] = (Pv[0] + self.ksi_x) + (self.v + self.ksi_v) * math.cos(Pv[2] + self.ksi_th) * self.dt
+        Pv[1] = (Pv[1] + self.ksi_y) + (self.v + self.ksi_v) * math.sin(Pv[2] + self.ksi_th) * self.dt
+        Pv[2] = (Pv[2] + self.ksi_th) + (self.w + self.ksi_w) * self.dt
+        
+        self.pose = Pv
+        
+        # Sensor GPS
+        C = np.array([[1, 0, 0], [0, 1, 0]])
+        R = np.array([[self.sigma_z_x**2, 0], [0, self.sigma_z_y**2]])
+        ruido = np.dot(np.sqrt(R), np.random.randn(2, 1)).flatten()
+        y = np.dot(C, Pv[:3]) + ruido
 
-        if self.ultimas_medidas[0] is None or self.ultimas_medidas[1] is None:
-            self.ultimas_medidas[0] = self.jointL
-            self.ultimas_medidas[1] = self.jointR
-            return
+        Pv[0] = (Pv[0] + self.ksi_x) + (self.v + self.ksi_v) * math.cos(Pv[2] + self.ksi_th) * self.dt
+        Pv[1] = (Pv[1] + self.ksi_y) + (self.v + self.ksi_v) * math.sin(Pv[2] + self.ksi_th) * self.dt
         
-        self.medidas[0] = self.jointL
-        self.medidas[1] = self.jointR
-        
-        diff_left = self.medidas[0] - self.ultimas_medidas[0]
-        self.distancias[0] = diff_left * self.raio + random.gauss(0, 0.002)
-        self.ultimas_medidas[0] = self.medidas[0]
-        
-        diff_right = self.medidas[1] - self.ultimas_medidas[1]
-        self.distancias[1] = diff_right * self.raio + random.gauss(0, 0.002)
-        self.ultimas_medidas[1] = self.medidas[1]
-        
-        # Cálculo da distância linear e angular percorrida
-        deltaS = (self.distancias[0] + self.distancias[1]) / 2.0
-        deltaTheta = (self.distancias[1] - self.distancias[0]) / self.distancia_rodas
-        
-        self.pose[2] = (self.pose[2] + deltaTheta) % (2 * math.pi)
-        self.pose[0] += deltaS * math.cos(self.pose[2])
-        self.pose[1] += deltaS * math.sin(self.pose[2])
+        #estiamndo a posição do robo
 
-        if self.laser72 == float('inf'):
-            media_nova = (self.mapa[self.porta] * self.sigma_movimento + self.pose[0] * self.sigma_lidar) / (self.sigma_movimento + self.sigma_lidar)
-            sigma_novo = 1 / (1/self.sigma_movimento + 1/self.sigma_lidar)
-            self.pose[0] = media_nova
-            self.sigma_movimento = sigma_novo
-            
-            self.porta = (self.porta + 1) % len(self.mapa)
+
+
+        # Estimativa de posição e matriz de covariância
+        Pe = self.pose.copy()
+        Pe[0] += self.v * math.cos(Pe[2]) * self.dt
+        Pe[1] += self.v * math.sin(Pe[2]) * self.dt
+        Pe[2] += self.w * self.dt
+
+        Q = np.array([[self.sigma_x**2, 0, 0],
+                      [0, self.sigma_y**2, 0],
+                      [0, 0, self.sigma_th**2]])
+
+        M = np.array([[self.sigma_v**2, 0],
+                      [0, self.sigma_w**2]])
+
+        F = np.array([[1, 0, -self.v * math.sin(Pe[2]) * self.dt],
+                      [0, 1, self.v * math.cos(Pe[2]) * self.dt],
+                      [0, 0, 1]])
+
+        G = np.array([[math.cos(Pe[2]) * self.dt, 0],
+                      [math.sin(Pe[2]) * self.dt, 0],
+                      [0, self.dt]])
+
+        H = C
+        z = np.dot(H, Pe)
+
+        # Ganho de Kalman
+        P = Q
+        K = np.dot(P, np.dot(H.T, np.linalg.pinv(np.dot(H, np.dot(P, H.T)) + R)))
+        Pe = Pe + np.dot(K, (y - z))
+        P = np.dot((np.eye(Q.shape[0]) - np.dot(K, H)), P)
         
+
         self.publicar_posicao()
 
     def publicar_posicao(self):
