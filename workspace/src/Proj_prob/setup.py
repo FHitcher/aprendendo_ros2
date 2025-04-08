@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'proj1'
+package_name = 'Proj_prob'
 
 setup(
     name=package_name,
