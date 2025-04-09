@@ -45,10 +45,11 @@ class NoDePosicao(Node):
         self.sigma_z_y = 0.005  # era 0.01
 
         self.v = 0.5
-        self.raio = 2
+        self.raio = .5
         self.w = self.v / self.raio
-        self.dt = 0.1
-
+        self.ct = self.get_clock().now().nanoseconds
+        self.lt = self.ct
+        self.dt = 0.0
     def velocidade(self):
         twist = Twist()
     
@@ -67,11 +68,14 @@ class NoDePosicao(Node):
         self.pose_x = msg.pose.pose.position.x
         self.pose_y = msg.pose.pose.position.y
 
+        self.ct = self.get_clock().now().nanoseconds
+        self.dt = (self.ct - self.lt) * 1e-9
+        self.lt = self.ct
+
 
     def update(self):
         # 1. Publica velocidade
         self.velocidade()
-
         # 2. Simulação do movimento real com ruído (pose real "verdadeira" que o GPS veria)
         ksi_x = self.sigma_x * random.gauss(0, 1)
         ksi_y = self.sigma_y * random.gauss(0, 1)
@@ -91,18 +95,18 @@ class NoDePosicao(Node):
         y = np.dot(C, Pv) + ruido
 
         # 4. EKF: Previsão com base na pose anterior
-        Pe = self.pose.copy()
-        Pe[0] += self.v * math.cos(Pe[2]) * self.dt
-        Pe[1] += self.v * math.sin(Pe[2]) * self.dt
-        Pe[2] += self.w * self.dt
+        self.Pe = self.pose.copy()
+        self.Pe[0] += self.v * math.cos(self.Pe[2]) * self.dt
+        self.Pe[1] += self.v * math.sin(self.Pe[2]) * self.dt
+        self.Pe[2] += self.w * self.dt
 
         # Matriz de covariância do processo (incerteza no movimento)
         Q = np.diag([self.sigma_x**2, self.sigma_y**2, self.sigma_th**2])
         R = np.diag([self.sigma_z_x**2, self.sigma_z_y**2])  # Medição
 
         F = np.array([
-            [1, 0, -self.v * math.sin(Pe[2]) * self.dt],
-            [0, 1,  self.v * math.cos(Pe[2]) * self.dt],
+            [1, 0, -self.v * math.sin(self.Pe[2]) * self.dt],
+            [0, 1,  self.v * math.cos(self.Pe[2]) * self.dt],
             [0, 0, 1]
         ])
 
@@ -111,20 +115,20 @@ class NoDePosicao(Node):
         # Covariância de erro (poderia ser persistente, mas aqui é estática para simplificar)
         P = Q
 
-        z = np.dot(H, Pe)  # medida esperada
+        z = np.dot(H, self.Pe)  # medida esperada
         K = np.dot(P, H.T).dot(np.linalg.inv(H.dot(P).dot(H.T) + R))  # ganho de Kalman
-        Pe = Pe + np.dot(K, (y - z))  # correção
+        self.Pe = self.Pe + np.dot(K, (y - z))  # correção
 
-        self.pose = Pe
+        self.pose = self.Pe
         self.publicar_posicao()
         
     def publicar_posicao(self):
         msg = Pose2D()
-        msg.x = self.pose[0]
-        msg.y = self.pose[1]
-        msg.theta = self.pose[2]
+        msg.x = self.Pe[0]
+        msg.y = self.Pe[1]
+        msg.theta = self.Pe[2]
         self.publisher_posicao.publish(msg)
-        self.get_logger().info(f'Publicando pose -> x: {msg.x:.2f}, y: {msg.y:.2f}, theta: {math.degrees(msg.theta):.2f}°')
+        #self.get_logger().info(f'Publicando pose -> x: {msg.x:.2f}, y: {msg.y:.2f}, theta: {math.degrees(msg.theta):.2f}°')
 
     def __del__(self):
         self.get_logger().info('Finalizando o nó! Tchau, tchau...')
