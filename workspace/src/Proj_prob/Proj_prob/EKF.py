@@ -24,7 +24,7 @@ class NoDePosicao(Node):
         self.velocidade_ = self.create_publisher(Twist, "/cmd_vel", 10)
         self.publisher_posicao = self.create_publisher(Pose2D, '/posicao', qos_profile)
 
-        self.timer = self.create_timer(0.1, self.update)  # Atualização periódica
+        #self.timer = self.create_timer(0.1, self.update)  # Atualização periódica
 
         # Variáveis de estado
         self.raio = 0.033
@@ -45,8 +45,8 @@ class NoDePosicao(Node):
         self.sigma_z_y = 0.005  # era 0.01
 
         self.v = 0.5
-        self.raio = .5
-        self.w = self.v / self.raio
+        self.raio_circ = .5
+        self.w = self.v / self.raio_circ
         self.ct = self.get_clock().now().nanoseconds
         self.lt = self.ct
         self.dt = 0.0
@@ -72,7 +72,8 @@ class NoDePosicao(Node):
         self.dt = (self.ct - self.lt) * 1e-9
         self.lt = self.ct
 
-
+        self.update()
+        
     def update(self):
         # 1. Publica velocidade
         self.velocidade()
@@ -132,6 +133,12 @@ class NoDePosicao(Node):
 
     def __del__(self):
         self.get_logger().info('Finalizando o nó! Tchau, tchau...')
+        twist = Twist()
+    
+        twist.linear.x = self.v
+        twist.angular.z = self.w
+
+        self.velocidade_.publish(twist)
 
 
 def main(args=None):

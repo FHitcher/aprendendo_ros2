@@ -22,6 +22,8 @@ setup(
         'console_scripts': [
             'no_posicao = Proj_prob.posicao:main',
             'no_ekf = Proj_prob.EKF:main',
+            'mapeamento = Proj_prob.mapeamento:main',
+            'lidar_to_grid_map = Proj_prob.lidar_to_grid_map:main',
         ],
     },
 )
